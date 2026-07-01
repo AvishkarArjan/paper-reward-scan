@@ -1,0 +1,9 @@
+papers/
+models/
+output/
+.env
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/

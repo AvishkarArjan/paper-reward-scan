@@ -1,0 +1,22 @@
+model:
+  # No-GPU option: hf-api/Qwen/Qwen2.5-7B-Instruct (uses HF free Inference API)
+  # Gated local models (requires `huggingface-cli login`): meta-llama/Llama-3.1-8B-Instruct
+  default: "mistralai/Mistral-7B-Instruct-v0.3"
+  hf_cache_dir: "models"
+
+paths:
+  papers_dir: "papers"
+  output_dir: "output"
+
+evaluation:
+  quality_threshold: 7
+  max_paper_chars: 20000
+  temperature: 0.01
+  max_retries: 3
+
+extraction:
+  temperature: 0.01
+  max_retries: 3
+
+dataset:
+  instruction: "Given the UAV task description and environment context below, generate the reward function as a standalone Python function."

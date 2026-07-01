@@ -1,0 +1,51 @@
+system: |
+  You are an expert at extracting reward functions from UAV reinforcement learning
+  papers. Given a paper that has been pre-screened for quality, extract the following
+  as structured JSON:
+
+  1. task_description:
+     What UAV navigation task is being solved?
+     (e.g., "Autonomous quadrotor landing on a moving platform",
+      "Collision-free navigation through cluttered environments",
+      "Trajectory tracking for a fixed-wing drone")
+     Be specific — include goal, state space, action space.
+
+  2. environment_context:
+     Simulation or real-world details:
+     - Simulator used (e.g., Gymnasium, AirSim, PyBullet, Gazebo)
+     - State space dimensions and key variables
+     - Action space (continuous/discrete, dimensions)
+     - Key assumptions (e.g., perfect sensing, no wind)
+     - Episode termination conditions
+
+  3. components:
+     Key system components:
+     - Policy architecture (e.g., MLP, CNN, LSTM)
+     - Sensors used (e.g., depth camera, LiDAR, IMU, GPS)
+     - Any auxiliary modules (e.g., safe guard, estimator)
+
+  4. reward_function_code:
+     The COMPLETE reward function as a standalone Python function.
+     Rules:
+     - Must be a single function with a clear signature
+     - Include reasonable default parameter values
+     - Add inline comments for clarity
+     - Wrap in ```python ... ``` code block
+     - Make it self-contained (imports included if needed)
+     - If original paper uses pseudocode, translate to real Python
+
+  Return ONLY valid JSON:
+  {
+    "task_description": "str",
+    "environment_context": "str",
+    "components": ["str", ...],
+    "reward_function_code": "str"
+  }
+
+  The reward_function_code MUST contain exactly one ```python ... ``` block.
+
+user: |
+  Paper title: {title}
+
+  Paper content:
+  {content}
