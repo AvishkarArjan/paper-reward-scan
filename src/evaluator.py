@@ -6,6 +6,7 @@ from .schemas import PaperMetadata, EvaluationResult
 from .utils import (
     load_yaml, save_json, load_json, read_pdf,
     get_paper_files, truncate_text,
+    compute_file_hash, load_content_registry, save_content_registry,
 )
 from .models import create_client, BaseClient
 
@@ -54,6 +55,21 @@ def evaluate_papers(
                 logger.info(f"[{stem}] → cached")
                 continue
 
+        file_hash = compute_file_hash(pdf_file)
+
+        if not force:
+            registry = load_content_registry(output_dir)
+            if file_hash in registry:
+                existing_stem = registry[file_hash]
+                existing_eval = evaluations_dir / f"{existing_stem}.json"
+                if existing_eval.exists():
+                    existing = load_json(existing_eval)
+                    if existing:
+                        results.append(EvaluationResult(**existing))
+                        skipped += 1
+                        logger.info(f"[{stem}] → content identical to {existing_stem}.pdf, skipped")
+                        continue
+
         pdf_text = read_pdf(pdf_file)
         if not pdf_text:
             logger.warning(f"[{stem}] → empty or unreadable PDF")
@@ -97,6 +113,9 @@ def evaluate_papers(
             model_used=model_name,
         )
         save_json(evaluation_file, result.model_dump())
+        registry = load_content_registry(output_dir)
+        registry[file_hash] = stem
+        save_content_registry(output_dir, registry)
         results.append(result)
         status = "accepted" if result.passes_quality else "rejected"
         logger.info(f"[{stem}] → {status}")

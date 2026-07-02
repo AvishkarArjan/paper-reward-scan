@@ -1,5 +1,6 @@
 import json
 import yaml
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -81,3 +82,25 @@ def truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + "\n\n[TRUNCATED]"
+
+
+CONTENT_REGISTRY = ".content_registry.json"
+
+
+def compute_file_hash(path: Path) -> str:
+    sha = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def load_content_registry(output_dir: Path) -> dict[str, str]:
+    path = output_dir / CONTENT_REGISTRY
+    data = load_json(path)
+    return data if data else {}
+
+
+def save_content_registry(output_dir: Path, registry: dict[str, str]) -> None:
+    path = output_dir / CONTENT_REGISTRY
+    save_json(path, registry)

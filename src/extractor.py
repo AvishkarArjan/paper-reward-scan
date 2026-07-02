@@ -5,6 +5,7 @@ from .schemas import EvaluationResult, ExtractionResult, SFTPair
 from .utils import (
     load_yaml, save_json, load_json, read_pdf,
     get_paper_files, truncate_text,
+    compute_file_hash, load_content_registry, save_content_registry,
 )
 from .models import create_client
 
@@ -69,6 +70,21 @@ def extract_rewards(
                 logger.info(f"[{stem}] → cached")
                 continue
 
+        file_hash = compute_file_hash(pdf_file)
+
+        if not force:
+            registry = load_content_registry(output_dir)
+            if file_hash in registry:
+                existing_stem = registry[file_hash]
+                existing_extraction = extractions_dir / f"{existing_stem}.json"
+                existing_pair = pairs_dir / f"{existing_stem}.json"
+                if existing_extraction.exists():
+                    existing = load_json(existing_extraction)
+                    if existing:
+                        results.append(ExtractionResult(**existing))
+                        logger.info(f"[{stem}] → content identical to {existing_stem}.pdf, skipped")
+                        continue
+
         pdf_text = read_pdf(pdf_file)
         if not pdf_text:
             logger.warning(f"[{stem}] → empty or unreadable PDF, skipping")
@@ -103,6 +119,9 @@ def extract_rewards(
             model_used=model_name,
         )
         save_json(extraction_file, result.model_dump())
+        registry = load_content_registry(output_dir)
+        registry[file_hash] = stem
+        save_content_registry(output_dir, registry)
 
         sft_pair = SFTPair(
             instruction=instruction_text,
