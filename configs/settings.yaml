@@ -1,7 +1,7 @@
 model:
   # No-GPU option: hf-api/Qwen/Qwen2.5-7B-Instruct (uses HF free Inference API)
   # Gated local models (requires `huggingface-cli login`): meta-llama/Llama-3.1-8B-Instruct
-  default: "mistralai/Mistral-7B-Instruct-v0.3"
+  default: "google/gemini-2.5-flash"
   hf_cache_dir: "models"
 
 paths:
@@ -20,3 +20,9 @@ extraction:
 
 dataset:
   instruction: "Given the UAV task description and environment context below, generate the reward function as a standalone Python function."
+
+rate_limits:
+  google: 5       # Gemini free tier: 5 req/min
+  openai: 60      # OpenAI tier 1: 60 req/min
+  xai: 60         # xAI default
+  hf-api: 30      # HF Inference API free tier

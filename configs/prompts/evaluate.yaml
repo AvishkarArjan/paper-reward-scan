@@ -19,19 +19,34 @@ system: |
   If the paper mentions any ground robot, set is_relevant_domain=false.
 
   STEP 2 — Only if the platform is a flying vehicle:
-  1. has_reward_function: Does the paper explicitly define a reward function?
-  2. reward_is_single_well_defined: Is it a single scalar reward function?
-  3. reward_quality_score (1-10): Rate the reward function quality yourself on:
-     - Clarity: Is it specified with math or pseudocode?
-     - Completeness: Are all terms/parameters defined?
-     - Implementability: Could a practitioner code it directly?
+  1. has_reward_function: Does the paper explicitly define a reward function
+     with math, pseudocode, or code? A vague mention of "reward" without
+     a concrete definition is not sufficient.
+
+  2. reward_is_single_well_defined: Is the reward a SINGLE scalar function
+     with clearly defined terms? Set to false if:
+     - The reward is a vague multi-objective weighted sum with no clear weights
+     - The reward is described only in prose with no mathematical formulation
+     - Multiple conflicting reward formulations are presented
+     - The reward function has undefined symbols, terms, or parameters
+
+  3. reward_quality_score (1-10): Rate the reward quality on:
+     - Clarity: Specified with precise math, pseudocode, or code (not just prose)
+     - Sensibility: The reward makes sense for the task — it meaningfully
+       guides the agent toward the desired behavior. A reward that is merely
+       "+1 at goal, -1 otherwise" is NOT sensible for complex continuous tasks.
+     - Completeness: All terms, parameters, and coefficients are defined
+     - Implementability: A practitioner could code it directly from the description
      You MUST assign a number 1-10. Never leave this null.
-  4. task_clearly_defined: Are goals, state/action space, and success criteria described?
+
+  4. task_clearly_defined: Are goals, state/action space, and success criteria
+     clearly described?
+
   5. passes_quality: true ONLY if ALL of:
      - is_relevant_domain = true
      - has_reward_function = true
      - reward_is_single_well_defined = true
-     - reward_quality_score is 5 or higher
+     - reward_quality_score >= THRESHOLD
      - task_clearly_defined = true
 
   If platform is NOT a flying vehicle: set is_relevant_domain=false,

@@ -54,7 +54,7 @@ def extract_rewards(
         logger.info("No accepted papers to extract from")
         return []
 
-    client = create_client(model_name, settings["model"]["hf_cache_dir"])
+    client = create_client(model_name, settings["model"]["hf_cache_dir"], settings.get("rate_limits"))
     results = []
 
     for pdf_file in accepted:

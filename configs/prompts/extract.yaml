@@ -26,13 +26,17 @@ system: |
 
   4. reward_function_code:
      The COMPLETE reward function as a standalone Python function.
-     Rules:
-     - Must be a single function with a clear signature
-     - Include reasonable default parameter values
-     - Add inline comments for clarity
+     CRITICAL GUIDELINES:
+     - Must be a SINGLE scalar reward function returning a single float
+     - Must faithfully represent the reward described in the paper
+     - All terms, weights, and parameters must be clearly defined
+     - The reward must be SENSIBLE for the task — it should meaningfully
+       guide the agent's behavior, not just sparse ±1 signals for complex tasks
+     - Include reasonable default parameter values that match the paper
      - Wrap in ```python ... ``` code block
      - Make it self-contained (imports included if needed)
-     - If original paper uses pseudocode, translate to real Python
+     - If the paper uses pseudocode, translate to real Python
+     - Do NOT fabricate reward terms that are not in the paper
 
   Return ONLY valid JSON:
   {

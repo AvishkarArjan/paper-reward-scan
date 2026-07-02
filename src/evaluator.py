@@ -37,7 +37,7 @@ def evaluate_papers(
     system_prompt = prompt_data["system"].replace("THRESHOLD", str(threshold))
     user_template = prompt_data["user"]
 
-    client = create_client(model_name, settings["model"]["hf_cache_dir"])
+    client = create_client(model_name, settings["model"]["hf_cache_dir"], settings.get("rate_limits"))
     results = []
     skipped = 0
 

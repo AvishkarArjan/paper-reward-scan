@@ -55,10 +55,10 @@ prs evaluate
 # Evaluate a single paper
 prs evaluate papers/my-paper.pdf
 
-# Use a specific model (default: mistralai/Mistral-7B-Instruct-v0.3)
+# Use a specific model (default: google/gemini-2.5-flash)
 prs evaluate -m openai/gpt-4o
 prs evaluate -m hf-api/Qwen/Qwen2.5-7B-Instruct   # no GPU needed
-prs evaluate -m google/gemini-2.0-flash
+prs evaluate -m google/gemini-2.5-flash
 
 # Force re-evaluate (ignore cache)
 prs evaluate -f
@@ -86,7 +86,7 @@ Papers must pass **all** gates to be `passes_quality: true`:
 1. **Domain relevance** — Platform must be a **flying vehicle** (UAV/drone/quadcopter/VTOL). Ground robots, cars, underwater vehicles are rejected.
 2. **Has explicit reward function** — Mathematical expression, pseudocode, or algorithmic description.
 3. **Single scalar reward** — Multiple terms OK if combined into one scalar (not vague multi-objective).
-4. **Quality score ≥ threshold** — The critic rates clarity, completeness, and implementability 1-10. Default threshold: 5 (set in `configs/settings.yaml`).
+4. **Quality score ≥ threshold** — The critic rates clarity, sensibility, completeness, and implementability 1-10. Default threshold: 7 (set in `configs/settings.yaml`).
 5. **Task clearly defined** — Goals, state/action space, and success criteria described.
 
 **Rejected papers** (`is_relevant_domain: false` or `passes_quality: false`) are skipped by subsequent steps.
@@ -167,10 +167,21 @@ Example output:
 | HuggingFace local (4-bit) | `-m hf-org/model-name` | ✅ Yes | — |
 | HF Inference API (free) | `-m hf-api/org/model-name` | ❌ No | HF token |
 | OpenAI | `-m openai/gpt-4o` | ❌ No | `OPENAI_API_KEY` |
-| Google Gemini | `-m google/gemini-2.0-flash` | ❌ No | `GOOGLE_API_KEY` |
+| Google Gemini | `-m google/gemini-2.5-flash` | ❌ No | `GOOGLE_API_KEY` |
 | xAI Grok | `-m xai/grok-3` | ❌ No | `XAI_API_KEY` |
 
-**Default** (`configs/settings.yaml`): `mistralai/Mistral-7B-Instruct-v0.3` (local GPU, non-gated).
+**Default** (`configs/settings.yaml`): `google/gemini-2.5-flash` (API key required).
+
+### Google model rate limits (free tier)
+
+| CLI model ID | Model | Requests/min | TPM | Requests/day |
+|---|---|---|---|---|
+| `google/gemini-2.5-flash-lite` | Gemini 2.5 Flash Lite | 15 | 250K | 500 |
+| `google/gemini-3.1-flash-lite-preview` | Gemini 3.1 Flash Lite (preview) | 15 | 250K | 500 |
+| `google/gemma-4-26b-a4b-it` | Gemma 4 26B | 15 | Unlimited | 1.5K |
+| `google/gemma-4-31b-it` | Gemma 4 31B | 15 | Unlimited | 1.5K |
+
+Set the matching `rate_limits.google` in `configs/settings.yaml` if you switch models.
 
 **No-GPU example**:
 ```bash
@@ -184,14 +195,18 @@ Uses HuggingFace's free Inference API — just need `huggingface-cli login`.
 
 | Key | Default | Description |
 |---|---|---|
-| `model.default` | `mistralai/Mistral-7B-Instruct-v0.3` | Model used when no `-m` flag |
+| `model.default` | `google/gemini-2.5-flash` | Model used when no `-m` flag |
 | `model.hf_cache_dir` | `models/` | HuggingFace cache directory |
-| `evaluation.quality_threshold` | `5` | Minimum reward quality score (1-10) |
-| `evaluation.max_paper_chars` | `15000` | Characters fed to LLM per paper |
+| `evaluation.quality_threshold` | `7` | Minimum reward quality score (1-10) |
+| `evaluation.max_paper_chars` | `20000` | Characters fed to LLM per paper |
 | `evaluation.temperature` | `0.01` | LLM sampling temperature |
 | `evaluation.max_retries` | `3` | Retries on malformed LLM output |
 | `paths.papers_dir` | `papers/` | PDF input directory |
 | `paths.output_dir` | `output/` | Output root |
+| `rate_limits.google` | `5` | Gemini API requests per minute |
+| `rate_limits.openai` | `60` | OpenAI API requests per minute |
+| `rate_limits.xai` | `60` | xAI API requests per minute |
+| `rate_limits.hf-api` | `30` | HF Inference API requests per minute |
 
 ### Prompt customization (`configs/prompts/`)
 
