@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from .utils import load_yaml, ensure_dir
+from .ocr import ocr_papers
 from .evaluator import evaluate_papers, print_evaluation_stats
 from .extractor import extract_rewards
 from .compiler import compile_dataset
@@ -35,9 +36,28 @@ def _load_settings() -> dict:
 
 
 @app.command()
+def ocr(
+    paper: Optional[str] = typer.Argument(
+        None, help="Path to a single PDF, or directory (default: PAPERS/)"
+    ),
+    force: bool = typer.Option(
+        False, "-f", "--force", help="Re-OCR already cached papers"
+    ),
+):
+    """OCR papers into clean text + formulas (Unlimited-OCR)."""
+    settings = _load_settings()
+
+    paper_path = Path(paper) if paper else Path(settings["paths"]["papers_dir"])
+
+    ensure_dir(Path(settings["paths"]["output_dir"]) / "ocr")
+
+    ocr_papers(paper_path, settings, force=force)
+
+
+@app.command()
 def evaluate(
     paper: Optional[str] = typer.Argument(
-        None, help="Path to a single PDF, or directory (default: papers/)"
+        None, help="Path to a single PDF, or directory (default: PAPERS/)"
     ),
     model: Optional[str] = typer.Option(
         None, "-m", "--model", help="Model name (HF or provider/name)"
@@ -65,7 +85,7 @@ def evaluate(
 @app.command()
 def extract(
     paper: Optional[str] = typer.Argument(
-        None, help="Path to a single PDF, or directory (default: papers/)"
+        None, help="Path to a single PDF, or directory (default: PAPERS/)"
     ),
     model: Optional[str] = typer.Option(
         None, "-m", "--model", help="Model name (HF or provider/name)"
@@ -101,6 +121,7 @@ def status():
     papers_dir = Path(settings["paths"]["papers_dir"])
 
     total_papers = len(list(papers_dir.glob("*.pdf")))
+    ocred = len(list((output_dir / "ocr").glob("*.md")))
     evaluateed = len(list((output_dir / "evaluations").glob("*.json")))
     extracted = len(list((output_dir / "extractions").glob("*.json")))
     pairs = len(list((output_dir / "dataset" / "pairs").glob("*.json")))
@@ -117,6 +138,7 @@ def status():
     print()
     print("📊 Pipeline Status")
     print(f"  Papers in directory: {total_papers}")
+    print(f"  OCR'd: {ocred}/{total_papers}")
     print(f"  Evaluateed: {evaluateed}/{total_papers}")
     if evaluateed:
         print(f"    Accepted: {accepted}")
@@ -136,10 +158,15 @@ def run_all(
         False, "-f", "--force", help="Re-process already cached papers"
     ),
 ):
-    """Run full pipeline: evaluate → extract → compile."""
+    """Run full pipeline: ocr → evaluate → extract → compile."""
     settings = _load_settings()
     model_name = model or settings["model"]["default"]
     paper_path = Path(settings["paths"]["papers_dir"])
+
+    typer.echo("=== Step 0: OCR ===")
+    ensure_dir(Path(settings["paths"]["output_dir"]) / "ocr")
+
+    ocr_papers(paper_path, settings, force=force)
 
     typer.echo("=== Step 1: Evaluate ===")
     ensure_dir(Path(settings["paths"]["output_dir"]) / "metadata")

@@ -41,6 +41,20 @@ def read_pdf(path: Path) -> str:
         return ""
 
 
+def get_paper_text(pdf_file: Path, settings: dict) -> str:
+    """Paper text for the LLM stages: prefers Unlimited-OCR output (text +
+    formulas as LaTeX), falls back to raw pypdf extraction."""
+    ocr_md = Path(settings["paths"]["output_dir"]) / "ocr" / f"{pdf_file.stem}.md"
+    if ocr_md.exists():
+        text = ocr_md.read_text(errors="ignore").strip()
+        if text:
+            return text
+    logger.warning(
+        f"[{pdf_file.stem}] no OCR text found — using raw pypdf text (run `prs ocr`)"
+    )
+    return read_pdf(pdf_file)
+
+
 def get_paper_files(directory: Path) -> list[Path]:
     if directory.is_file():
         if directory.suffix.lower() == ".pdf":

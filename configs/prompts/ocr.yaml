@@ -1,0 +1,5 @@
+# Prompt sent to the Unlimited-OCR model. The <image> token is the required
+# image placeholder — keep it. Edit the rest freely.
+prompt: |
+  <image>Parse the document. Extract all text, tables, and every mathematical
+  formula as LaTeX. Preserve section structure as markdown.

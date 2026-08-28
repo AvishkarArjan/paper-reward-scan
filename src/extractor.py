@@ -3,7 +3,7 @@ from pathlib import Path
 
 from .schemas import EvaluationResult, ExtractionResult, SFTPair
 from .utils import (
-    load_yaml, save_json, load_json, read_pdf,
+    load_yaml, save_json, load_json, get_paper_text,
     get_paper_files, truncate_text,
     compute_file_hash, load_content_registry, save_content_registry,
 )
@@ -55,7 +55,13 @@ def extract_rewards(
         logger.info("No accepted papers to extract from")
         return []
 
-    client = create_client(model_name, settings["model"]["hf_cache_dir"], settings.get("rate_limits"))
+    client = create_client(
+        model_name,
+        settings["model"]["hf_cache_dir"],
+        settings.get("rate_limits"),
+        quantization=settings["model"].get("quantization", "4bit"),
+        vllm_config=settings.get("vllm"),
+    )
     results = []
 
     for pdf_file in accepted:
@@ -85,7 +91,7 @@ def extract_rewards(
                         logger.info(f"[{stem}] → content identical to {existing_stem}.pdf, skipped")
                         continue
 
-        pdf_text = read_pdf(pdf_file)
+        pdf_text = get_paper_text(pdf_file, settings)
         if not pdf_text:
             logger.warning(f"[{stem}] → empty or unreadable PDF, skipping")
             continue

@@ -1,0 +1,17 @@
+# Dedicated env for the Unlimited-OCR transformers engine (baidu/Unlimited-OCR).
+# Pins match the model's tested stack and MUST stay separate from the main env,
+# which needs a much newer transformers for GLM-4.7-Flash / Qwen3.8-27B.
+#   conda create -n prs-ocr python=3.12 -y && conda activate prs-ocr
+#   pip install -r requirements-ocr.txt
+#   pip install -e .
+# Then run: prs ocr  (or prs run-all with ocr.engine: transformers)
+torch==2.10.0
+torchvision==0.25.0
+transformers==4.57.1
+Pillow==12.1.1
+matplotlib==3.10.8
+einops==0.8.2
+addict==2.4.0
+easydict==1.13
+pymupdf==1.27.2.2
+psutil==7.2.2

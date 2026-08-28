@@ -1,11 +1,40 @@
 model:
-  # No-GPU option: hf-api/Qwen/Qwen2.5-7B-Instruct (uses HF free Inference API)
-  # Gated local models (requires `huggingface-cli login`): meta-llama/Llama-3.1-8B-Instruct
-  default: "google/gemini-2.5-flash"
+  # Local 4-bit models (need a GPU with enough VRAM):
+  #   zai-org/GLM-4.7-Flash    30B-A3B MoE, MIT        (~18 GB VRAM in 4-bit)
+  #   Qwen/Qwen3.8-27B         dense 27B, Apache 2.0   (~15 GB VRAM in 4-bit)
+  # API models (no GPU needed): google/gemini-2.5-flash, openai/gpt-4o, hf-api/...
+  default: "zai-org/GLM-4.7-Flash"
   hf_cache_dir: "models"
+  quantization: "4bit"   # "4bit" (bitsandbytes) or "none" (fp16)
+
+vllm:
+  # Local vLLM server (OpenAI-compatible). Start it first, e.g.:
+  #   vllm serve Qwen/Qwen3.8-27B --max-model-len 32768 --gpu-memory-utilization 0.9
+  # then reference models as vllm/<model-id>.
+  base_url: "http://localhost:8000/v1"
+  api_key: "EMPTY"
+
+ocr:
+  # Unlimited-OCR: pdf → text + formulas (LaTeX).
+  # engine "transformers" runs the model in-process (needs a dedicated env with
+  # the pinned deps in requirements-ocr.txt); engine "vllm" talks to a served
+  # unlimited-ocr endpoint (e.g. docker: vllm/vllm-openai:unlimited-ocr).
+  engine: "transformers"
+  model: "baidu/Unlimited-OCR"
+  cache_dir: "models"
+  dpi: 300
+  image_size: 1024
+  max_length: 32768
+  no_repeat_ngram_size: 35
+  ngram_window: 1024
+  prompt_file: "configs/prompts/ocr.yaml"
+  vllm:
+    base_url: "http://localhost:8001/v1"
+    api_key: "EMPTY"
+    model: "Unlimited-OCR"
 
 paths:
-  papers_dir: "papers"
+  papers_dir: "PAPERS"
   output_dir: "output"
 
 evaluation:
@@ -26,3 +55,4 @@ rate_limits:
   openai: 60      # OpenAI tier 1: 60 req/min
   xai: 60         # xAI default
   hf-api: 30      # HF Inference API free tier
+  vllm: 240       # local vLLM server (hosted, so effectively unlimited)

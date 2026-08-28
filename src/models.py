@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 _HF_TOKEN = get_token()
 
+MODELS_WITH_THINKING_ON_DEFAULT = ("qwen3.8",)
+
 _rate_limiters: dict[str, "RateLimiter"] = {}
 _rate_limiters_lock = threading.Lock()
 
@@ -51,6 +53,8 @@ def parse_model_name(model_name: str) -> tuple[str, str]:
         return "xai", model_name.removeprefix("xai/")
     if model_name.startswith("hf-api/"):
         return "hf-api", model_name.removeprefix("hf-api/")
+    if model_name.startswith("vllm/"):
+        return "vllm", model_name.removeprefix("vllm/")
     return "hf", model_name
 
 
@@ -58,6 +62,8 @@ def create_client(
     model_name: str,
     hf_cache_dir: str = "models",
     rate_limits: dict[str, int] | None = None,
+    quantization: str = "4bit",
+    vllm_config: dict | None = None,
 ) -> "BaseClient":
     rate_limits = rate_limits or {}
     provider, actual_name = parse_model_name(model_name)
@@ -70,8 +76,16 @@ def create_client(
         return XAIClient(actual_name, rpm)
     elif provider == "hf-api":
         return HFInferenceAPIClient(actual_name, rpm)
+    elif provider == "vllm":
+        vllm_config = vllm_config or {}
+        return VLLMClient(
+            actual_name,
+            base_url=vllm_config.get("base_url", "http://localhost:8000/v1"),
+            api_key=vllm_config.get("api_key", "EMPTY"),
+            rpm=rpm,
+        )
     else:
-        return HFClient(actual_name, hf_cache_dir)
+        return HFClient(actual_name, hf_cache_dir, quantization=quantization)
 
 
 class BaseClient(ABC):
@@ -127,11 +141,16 @@ class BaseClient(ABC):
 
 
 class HFClient(BaseClient):
-    def __init__(self, model_name: str, cache_dir: str = "models"):
+    def __init__(self, model_name: str, cache_dir: str = "models", quantization: str = "4bit"):
         super().__init__(model_name, rpm=0)
         self.cache_dir = cache_dir
+        self.quantization = quantization
         self.model = None
         self.tokenizer = None
+        self.is_multimodal = False
+        self.chat_template_kwargs = None
+        if any(tag in model_name.lower() for tag in MODELS_WITH_THINKING_ON_DEFAULT):
+            self.chat_template_kwargs = {"enable_thinking": False}
 
     @classmethod
     def provider_name(cls) -> str:
@@ -141,26 +160,44 @@ class HFClient(BaseClient):
         if self.model is not None:
             return
         import torch
-        from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+        from transformers import (
+            AutoTokenizer, AutoModelForCausalLM, AutoModelForImageTextToText,
+            AutoConfig, BitsAndBytesConfig,
+        )
         from huggingface_hub.utils import HfHubHTTPError
 
         cache_path = Path(self.cache_dir).resolve()
         cache_path.mkdir(parents=True, exist_ok=True)
 
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
+        load_kwargs = dict(
+            cache_dir=str(cache_path),
+            trust_remote_code=True,
+            token=_HF_TOKEN,
         )
 
-        logger.info(f"Loading {self.model_name} on local GPU (4-bit)...")
+        config = AutoConfig.from_pretrained(self.model_name, **load_kwargs)
+        self.is_multimodal = bool(
+            getattr(config, "vision_config", None) or getattr(config, "image_token_id", None)
+        )
+        model_cls = AutoModelForImageTextToText if self.is_multimodal else AutoModelForCausalLM
+
+        quantization_config = None
+        torch_dtype = torch.float16
+        if self.quantization == "4bit":
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            logger.info(f"Loading {self.model_name} on local GPU (4-bit)...")
+        else:
+            logger.info(f"Loading {self.model_name} on local GPU ({torch_dtype})...")
+
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
-                cache_dir=str(cache_path),
-                trust_remote_code=True,
-                token=_HF_TOKEN,
+                **load_kwargs,
             )
         except (OSError, HfHubHTTPError) as e:
             msg = str(e)
@@ -179,14 +216,12 @@ class HFClient(BaseClient):
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         try:
-            self.model = AutoModelForCausalLM.from_pretrained(
+            self.model = model_cls.from_pretrained(
                 self.model_name,
                 quantization_config=quantization_config,
                 device_map="auto",
-                cache_dir=str(cache_path),
-                trust_remote_code=True,
-                torch_dtype=torch.float16,
-                token=_HF_TOKEN,
+                torch_dtype=torch_dtype,
+                **load_kwargs,
             )
         except (OSError, HfHubHTTPError) as e:
             msg = str(e)
@@ -216,8 +251,9 @@ class HFClient(BaseClient):
             {"role": "user", "content": user_prompt},
         ]
 
+        template_kwargs = {"chat_template_kwargs": self.chat_template_kwargs} if self.chat_template_kwargs else {}
         prompt = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+            messages, tokenize=False, add_generation_prompt=True, **template_kwargs
         )
 
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
@@ -329,6 +365,78 @@ class OpenAIClient(BaseClient):
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
+        return response.choices[0].message.content.strip()
+
+
+class VLLMClient(BaseClient):
+    """Client for a local vLLM HTTP server (OpenAI-compatible). Start it first:
+
+        vllm serve <model> --max-model-len 32768 --gpu-memory-utilization 0.9
+    """
+
+    def __init__(self, model_name: str, base_url: str = "http://localhost:8000/v1", api_key: str = "EMPTY", rpm: float = 60):
+        super().__init__(model_name, rpm=rpm)
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.chat_template_kwargs = None
+        if any(tag in model_name.lower() for tag in MODELS_WITH_THINKING_ON_DEFAULT):
+            self.chat_template_kwargs = {"enable_thinking": False}
+
+    @classmethod
+    def provider_name(cls) -> str:
+        return "vllm"
+
+    def _parse_retry_delay(self, error: Exception) -> float | None:
+        try:
+            import openai
+            if isinstance(error, openai.RateLimitError):
+                try:
+                    return float(error.response.headers.get("retry-after-ms", 0)) / 1000 + 1
+                except (TypeError, AttributeError):
+                    pass
+        except ImportError:
+            pass
+        return None
+
+    def _hint_start_server(self) -> None:
+        print()
+        print(f"❌ Cannot reach a vLLM server at {self.base_url}.")
+        print("   Start it first, e.g. in another terminal:")
+        print(f"     vllm serve {self.model_name} --max-model-len 32768 --gpu-memory-utilization 0.9")
+        print()
+        print("   Then run this command against vllm/... (or check configs/settings.yaml → vllm.base_url)")
+        print()
+
+    def generate(
+        self, system_prompt: str, user_prompt: str, temperature: float = 0.01, max_tokens: int = 4096
+    ) -> str:
+        self.rate_limiter.wait()
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise RuntimeError("openai SDK not installed. Run: pip install -e '.[openai]'")
+
+        client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=600)
+
+        extra_body = {}
+        if self.chat_template_kwargs:
+            extra_body["chat_template_kwargs"] = self.chat_template_kwargs
+
+        try:
+            response = client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                extra_body=extra_body or None,
+            )
+        except Exception:
+            self._hint_start_server()
+            raise
+
         return response.choices[0].message.content.strip()
 
 
