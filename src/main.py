@@ -1,9 +1,11 @@
 import typer
 import logging
+import contextlib
 from pathlib import Path
 from typing import Optional
 
-from .utils import load_yaml, ensure_dir
+from .utils import load_yaml, ensure_dir, timed
+from .stats import begin_run, end_run, configure_stats, show_stats
 from .ocr import ocr_papers
 from .evaluator import evaluate_papers, print_evaluation_stats
 from .extractor import extract_rewards
@@ -26,13 +28,60 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+_FILE_LOGGING = {"attached": False}
 
-def _load_settings() -> dict:
+
+def _enable_file_logging(output_dir: Path) -> None:
+    """Mirror every log line to output/logs/prs.log with full-datetime stamps."""
+    if _FILE_LOGGING["attached"]:
+        return
+    _FILE_LOGGING["attached"] = True
+    log_path = output_dir / "logs" / "prs.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logging.getLogger().addHandler(fh)
+    logger.info(f"── run ────────────────────────────────────────────────────")
+    logger.info(f"log file: {log_path}")
+    logger.info(f"───────────────────────────────────────────────────────────")
+
+
+def _load_settings(enable_logging: bool = True) -> dict:
     settings_path = Path("configs/settings.yaml")
     if not settings_path.exists():
         logger.error("configs/settings.yaml not found")
         raise typer.Exit(1)
-    return load_yaml(settings_path)
+    settings = load_yaml(settings_path)
+    output_dir = Path(settings["paths"]["output_dir"])
+    configure_stats(output_dir / "logs" / "stats.json")
+    if enable_logging:
+        _enable_file_logging(output_dir)
+    return settings
+
+
+@contextlib.contextmanager
+def _tracked(command: str, **meta):
+    """Open a stats run record and always flush it (even on failure)."""
+    begin_run(command, **meta)
+    try:
+        yield
+    finally:
+        end_run()
+
+
+def _stats_path() -> Path:
+    from .stats import get_stats_path
+    path = get_stats_path()
+    if path is None:
+        settings = _load_settings(enable_logging=False)
+        path = Path(settings["paths"]["output_dir"]) / "logs" / "stats.json"
+    return path
 
 
 @app.command()
@@ -51,7 +100,8 @@ def ocr(
 
     ensure_dir(Path(settings["paths"]["output_dir"]) / "ocr")
 
-    ocr_papers(paper_path, settings, force=force)
+    with _tracked("ocr", force=force), timed("step: OCR", step=True):
+        ocr_papers(paper_path, settings, force=force)
 
 
 @app.command()
@@ -65,6 +115,9 @@ def evaluate(
     force: bool = typer.Option(
         False, "-f", "--force", help="Re-evaluate already cached papers"
     ),
+    raw: bool = typer.Option(
+        False, "-r", "--raw", help="Allow pypdf fallback when OCR text is missing"
+    ),
 ):
     """Evaluate papers and shortlist those with quality reward functions."""
     settings = _load_settings()
@@ -75,7 +128,8 @@ def evaluate(
     ensure_dir(Path(settings["paths"]["output_dir"]) / "metadata")
     ensure_dir(Path(settings["paths"]["output_dir"]) / "evaluations")
 
-    results, total, skipped = evaluate_papers(paper_path, settings, model_name, force=force)
+    with _tracked("evaluate", model=model_name, force=force, fallback=raw), timed("step: evaluate", step=True):
+        results, total, skipped = evaluate_papers(paper_path, settings, model_name, force=force, fallback=raw)
     if results:
         print_evaluation_stats(results, total, skipped)
     else:
@@ -93,6 +147,9 @@ def extract(
     force: bool = typer.Option(
         False, "-f", "--force", help="Re-extract already cached papers"
     ),
+    raw: bool = typer.Option(
+        False, "-r", "--raw", help="Allow pypdf fallback when OCR text is missing"
+    ),
 ):
     """Extract reward functions from accepted papers."""
     settings = _load_settings()
@@ -103,20 +160,22 @@ def extract(
     ensure_dir(Path(settings["paths"]["output_dir"]) / "extractions")
     ensure_dir(Path(settings["paths"]["output_dir"]) / "dataset" / "pairs")
 
-    extract_rewards(paper_path, settings, model_name, force=force)
+    with _tracked("extract", model=model_name, force=force, fallback=raw), timed("step: extract", step=True):
+        extract_rewards(paper_path, settings, model_name, force=force, fallback=raw)
 
 
 @app.command()
 def compile():
     """Compile individual SFT pairs into a single dataset."""
     settings = _load_settings()
-    compile_dataset(settings)
+    with _tracked("compile"), timed("step: compile", step=True):
+        compile_dataset(settings)
 
 
 @app.command()
 def status():
     """Show pipeline status overview."""
-    settings = _load_settings()
+    settings = _load_settings(enable_logging=False)
     output_dir = Path(settings["paths"]["output_dir"])
     papers_dir = Path(settings["paths"]["papers_dir"])
 
@@ -157,6 +216,9 @@ def run_all(
     force: bool = typer.Option(
         False, "-f", "--force", help="Re-process already cached papers"
     ),
+    raw: bool = typer.Option(
+        False, "-r", "--raw", help="Allow pypdf fallback when OCR text is missing"
+    ),
 ):
     """Run full pipeline: ocr → evaluate → extract → compile."""
     settings = _load_settings()
@@ -166,13 +228,15 @@ def run_all(
     typer.echo("=== Step 0: OCR ===")
     ensure_dir(Path(settings["paths"]["output_dir"]) / "ocr")
 
-    ocr_papers(paper_path, settings, force=force)
+    with _tracked("run-all", model=model_name, force=force, fallback=raw), timed("step: OCR", step=True):
+        ocr_papers(paper_path, settings, force=force)
 
     typer.echo("=== Step 1: Evaluate ===")
     ensure_dir(Path(settings["paths"]["output_dir"]) / "metadata")
     ensure_dir(Path(settings["paths"]["output_dir"]) / "evaluations")
 
-    results, total, skipped = evaluate_papers(paper_path, settings, model_name, force=force)
+    with timed("step: evaluate", step=True):
+        results, total, skipped = evaluate_papers(paper_path, settings, model_name, force=force, fallback=raw)
     if results:
         print_evaluation_stats(results, total, skipped)
 
@@ -180,12 +244,24 @@ def run_all(
     ensure_dir(Path(settings["paths"]["output_dir"]) / "extractions")
     ensure_dir(Path(settings["paths"]["output_dir"]) / "dataset" / "pairs")
 
-    extract_rewards(paper_path, settings, model_name, force=force)
+    with timed("step: extract", step=True):
+        extract_rewards(paper_path, settings, model_name, force=force, fallback=raw)
 
     typer.echo("=== Step 3: Compile ===")
-    compile_dataset(settings)
+    with timed("step: compile", step=True):
+        compile_dataset(settings)
 
     typer.echo("✅ Pipeline complete!")
+
+
+@app.command()
+def stats(
+    limit: int = typer.Option(
+        0, "-n", "--limit", help="Show only the N most recent runs (0 = all)"
+    ),
+):
+    """Show per-run / per-step / per-paper timing stats (rich tables)."""
+    show_stats(_stats_path(), limit=limit)
 
 
 def main():

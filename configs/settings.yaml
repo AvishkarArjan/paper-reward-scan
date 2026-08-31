@@ -1,11 +1,18 @@
 model:
-  # Local 4-bit models (need a GPU with enough VRAM):
-  #   zai-org/GLM-4.7-Flash    30B-A3B MoE, MIT        (~18 GB VRAM in 4-bit)
-  #   Qwen/Qwen3.8-27B         dense 27B, Apache 2.0   (~15 GB VRAM in 4-bit)
+  # Local 4-bit models. NOTE: on a 16GB GPU only dense models ≲ ~12B fit in
+  # 4-bit (Qwen3.8-27B and GLM-4.7-Flash are too large to run locally here).
+  #   Qwen/Qwen3-14B              best quality reasoning that fits (~7.5 GB in 4-bit)
+  #   Qwen/Qwen2.5-1.5B-Instruct  small but reliable (~2 GB in 4-bit)
+  #   Qwen/Qwen3-8B               better quality (~5 GB in 4-bit)
   # API models (no GPU needed): google/gemini-2.5-flash, openai/gpt-4o, hf-api/...
-  default: "zai-org/GLM-4.7-Flash"
+  default: "Qwen/Qwen3-14B"
   hf_cache_dir: "models"
-  quantization: "4bit"   # "4bit" (bitsandbytes) or "none" (fp16)
+  quantization: "4bit"   # "4bit" (bitsandbytes), "8bit" or "none" (fp16)
+  # device_map: "auto" is the default. To force everything onto GPU set e.g.:
+  #   device_map: null
+  #   max_memory: "14GiB"   # also cap GPU memory (leave ~1GB for activations)
+  device_map: "auto"
+  max_memory: null
 
 vllm:
   # Local vLLM server (OpenAI-compatible). Start it first, e.g.:

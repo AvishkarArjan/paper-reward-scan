@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 _HF_TOKEN = get_token()
 
-MODELS_WITH_THINKING_ON_DEFAULT = ("qwen3.8",)
+MODELS_WITH_THINKING_ON_DEFAULT = ("qwen3.8", "qwen3-14b")
 
 _rate_limiters: dict[str, "RateLimiter"] = {}
 _rate_limiters_lock = threading.Lock()
@@ -64,6 +64,8 @@ def create_client(
     rate_limits: dict[str, int] | None = None,
     quantization: str = "4bit",
     vllm_config: dict | None = None,
+    device_map=None,
+    max_memory=None,
 ) -> "BaseClient":
     rate_limits = rate_limits or {}
     provider, actual_name = parse_model_name(model_name)
@@ -85,7 +87,10 @@ def create_client(
             rpm=rpm,
         )
     else:
-        return HFClient(actual_name, hf_cache_dir, quantization=quantization)
+        return HFClient(
+            actual_name, hf_cache_dir, quantization=quantization,
+            device_map=device_map, max_memory=max_memory,
+        )
 
 
 class BaseClient(ABC):
@@ -141,10 +146,12 @@ class BaseClient(ABC):
 
 
 class HFClient(BaseClient):
-    def __init__(self, model_name: str, cache_dir: str = "models", quantization: str = "4bit"):
+    def __init__(self, model_name: str, cache_dir: str = "models", quantization: str = "4bit", device_map=None, max_memory=None):
         super().__init__(model_name, rpm=0)
         self.cache_dir = cache_dir
         self.quantization = quantization
+        self.device_map = device_map
+        self.max_memory = max_memory
         self.model = None
         self.tokenizer = None
         self.is_multimodal = False
@@ -191,6 +198,12 @@ class HFClient(BaseClient):
                 bnb_4bit_quant_type="nf4",
             )
             logger.info(f"Loading {self.model_name} on local GPU (4-bit)...")
+        elif self.quantization in ("8bit", "8bit-llm-int8"):
+            quantization_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=True,
+            )
+            logger.info(f"Loading {self.model_name} on local GPU (8-bit)...")
         else:
             logger.info(f"Loading {self.model_name} on local GPU ({torch_dtype})...")
 
@@ -215,14 +228,35 @@ class HFClient(BaseClient):
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+        use_offload = False
         try:
-            self.model = model_cls.from_pretrained(
-                self.model_name,
+            kwargs = dict(
                 quantization_config=quantization_config,
-                device_map="auto",
                 torch_dtype=torch_dtype,
                 **load_kwargs,
             )
+            if self.max_memory:
+                kwargs["max_memory"] = {0: self.max_memory, "cpu": "20GiB"}
+            try:
+                self.model = model_cls.from_pretrained(
+                    self.model_name,
+                    device_map=self.device_map or "auto",
+                    **kwargs,
+                )
+            except (ValueError, RuntimeError):
+                if self.device_map is None and quantization_config is not None:
+                    # device_map="auto" can offload modules to CPU for large
+                    # quantized models, which bitsandbytes rejects. Fall back to
+                    # an explicit cpu-offload device map so the model still loads
+                    # (slower, but does not hard-fail on a small GPU).
+                    logger.warning(
+                        f"Auto device map offloaded modules to CPU for {self.model_name}; "
+                        "retrying with explicit cpu-offload device map. Tip: raise "
+                        "`max_memory` in configs/settings.yaml or free GPU memory."
+                    )
+                    use_offload = True
+                else:
+                    raise
         except (OSError, HfHubHTTPError) as e:
             msg = str(e)
             if "gated" in msg or "403" in msg:
@@ -235,6 +269,15 @@ class HFClient(BaseClient):
                 print("     prs evaluate -m mistralai/Mistral-7B-Instruct-v0.3")
                 print()
             raise
+
+        if use_offload:
+            self.model = model_cls.from_pretrained(
+                self.model_name,
+                device_map="sequential",
+                offload_folder="/tmp/prs_offload",
+                offload_state_dict=True,
+                **kwargs,
+            )
 
         import torch
         device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"

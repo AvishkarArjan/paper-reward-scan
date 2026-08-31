@@ -38,11 +38,15 @@ system: |
      - If the paper uses pseudocode, translate to real Python
      - Do NOT fabricate reward terms that are not in the paper
 
-  Return ONLY valid JSON:
+  Return ONLY valid JSON matching this EXACT schema. Every field must be a flat
+  value — do NOT nest objects or arrays inside "task_description" or
+  "environment_context". "environment_context" is a single multi-line string that
+  lists the environment details as prose or line-separated bullet text (NOT a JSON
+  object). "components" is a flat array of short strings:
   {
     "task_description": "str",
-    "environment_context": "str",
-    "components": ["str", ...],
+    "environment_context": "str（a single string, bullets allowed, NOT an object）",
+    "components": ["str", "str", ...],
     "reward_function_code": "str"
   }
 

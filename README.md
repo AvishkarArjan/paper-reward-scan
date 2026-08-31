@@ -27,10 +27,13 @@ Set the default in `configs/settings.yaml` (`model.default`) or pass `-m` per ru
 
 | Model | Command | VRAM (4-bit) |
 |---|---|---|
-| GLM-4.7-Flash (30B-A3B MoE, MIT) | `-m zai-org/GLM-4.7-Flash` | ~18 GB |
-| Qwen3.8-27B (dense 27B, Apache 2.0) | `-m Qwen/Qwen3.8-27B` | ~15 GB |
+| **Qwen3-14B** (dense, Apache 2.0) | `-m Qwen/Qwen3-14B` (default) | ~8-10 GB |
+| Qwen3-8B (dense, Apache 2.0) | `-m Qwen/Qwen3-8B` | ~5-6 GB |
+| Qwen2.5-1.5B-Instruct (small/fast) | `-m Qwen/Qwen2.5-1.5B-Instruct` | ~2 GB |
 
-On a 16 GB card, use Qwen3.8-27B (or GLM with CPU offload — slower).
+On a 16 GB card, Qwen3-14B in 4-bit is the best-quality fit and is the default.
+(Larger models like Qwen3.8-27B or GLM-4.7-Flash do **not** fit standalone in 4-bit
+on 16 GB because all weights must be resident; use them via vLLM/CPU-offload only.)
 
 > Faster: serve with vLLM and point the pipeline at it — see below.
 
@@ -56,7 +59,12 @@ prs evaluate                   # screen papers, keep only good reward functions
 prs extract                    # extract reward code from accepted papers
 prs compile                    # merge all SFT pairs into one dataset
 prs status                     # show how far along the pipeline you are
+prs stats                      # timing stats per step/paper (pretty rich tables)
 ```
+
+Every pipeline command logs timestamps + durations to `logs/prs.log` (console +
+file) and accumulates machine-readable stats in `logs/stats.json`. `prs stats`
+renders those runs as tables; use `prs stats -n 5` to show only the last 5.
 
 Evaluate a single paper / force re-run:
 
@@ -64,6 +72,9 @@ Evaluate a single paper / force re-run:
 prs evaluate PAPERS/my-paper.pdf
 prs evaluate -f                # ignore cached results, re-run everything
 ```
+
+`prs evaluate` and `prs extract` read the OCR'd markdown by default. Papers with
+no OCR output are skipped; pass `-r/--raw` to force the raw pypdf fallback.
 
 Every command accepts `-m <model>` and most accept `-f`. Skip flags take effect
 per stage: `prs evaluate` and `prs extract` cache per-paper results.
@@ -75,6 +86,9 @@ output/
 ├── ocr/{paper}.md                # clean OCR text (text + LaTeX formulas)
 ├── evaluations/{paper}.json      # pass/reject + quality score per paper
 ├── extractions/{paper}.json      # extracted reward code + context
+├── logs/
+│   ├── prs.log                   # human-readable run log (timestamps + durations)
+│   └── stats.json                # structured timing stats, shown by `prs stats`
 └── dataset/
     ├── pairs/{paper}.json        # individual SFT pairs (Alpaca format)
     └── compiled/

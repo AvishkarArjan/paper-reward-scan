@@ -4,10 +4,11 @@ from typing import Optional
 
 from .schemas import PaperMetadata, EvaluationResult
 from .utils import (
-    load_yaml, save_json, load_json, get_paper_text,
+    load_yaml, save_json, load_json, get_paper_text, timed,
     get_paper_files, truncate_text,
     compute_file_hash, load_content_registry, save_content_registry,
 )
+from .stats import note_paper
 from .models import create_client, BaseClient
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ def evaluate_papers(
     settings: dict,
     model_name: str,
     force: bool = False,
+    fallback: bool = True,
 ) -> tuple[list[EvaluationResult], int, int]:
     papers_dir = Path(settings["paths"]["papers_dir"])
     output_dir = Path(settings["paths"]["output_dir"])
@@ -44,6 +46,8 @@ def evaluate_papers(
         settings.get("rate_limits"),
         quantization=settings["model"].get("quantization", "4bit"),
         vllm_config=settings.get("vllm"),
+        device_map=settings["model"].get("device_map"),
+        max_memory=settings["model"].get("max_memory"),
     )
     results = []
     skipped = 0
@@ -58,6 +62,7 @@ def evaluate_papers(
             if existing:
                 results.append(EvaluationResult(**existing))
                 skipped += 1
+                note_paper(stem, "cached")
                 logger.info(f"[{stem}] → cached")
                 continue
 
@@ -73,11 +78,13 @@ def evaluate_papers(
                     if existing:
                         results.append(EvaluationResult(**existing))
                         skipped += 1
+                        note_paper(stem, "identical")
                         logger.info(f"[{stem}] → content identical to {existing_stem}.pdf, skipped")
                         continue
 
-        pdf_text = get_paper_text(pdf_file, settings)
+        pdf_text = get_paper_text(pdf_file, settings, fallback=fallback)
         if not pdf_text:
+            note_paper(stem, "unreadable")
             logger.warning(f"[{stem}] → empty or unreadable PDF")
             continue
 
@@ -92,8 +99,8 @@ def evaluate_papers(
         truncated = truncate_text(pdf_text, max_chars)
         user_prompt = user_template.replace("{title}", pdf_file.name).replace("{content}", truncated)
 
-        logger.info(f"[{stem}] evaluating...")
-        raw = client.generate_structured(system_prompt, user_prompt, temperature=temperature, max_retries=max_retries)
+        with timed(f"[{stem}] evaluate", stem=stem):
+            raw = client.generate_structured(system_prompt, user_prompt, temperature=temperature, max_retries=max_retries)
         if raw is None:
             logger.error(f"[{stem}] failed to get valid evaluation")
             continue

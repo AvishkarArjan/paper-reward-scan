@@ -8,9 +8,10 @@ import shutil
 from pathlib import Path
 
 from .utils import (
-    load_yaml, get_paper_files,
+    load_yaml, get_paper_files, timed,
     compute_file_hash, load_content_registry, save_content_registry,
 )
+from .stats import note_paper
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +255,7 @@ def ocr_papers(paper_path: Path, settings: dict, force: bool = False) -> tuple[i
 
             if clean_file.exists() and not force:
                 skipped += 1
+                note_paper(stem, "cached")
                 logger.info(f"[{stem}] → cached OCR")
                 continue
 
@@ -265,21 +267,23 @@ def ocr_papers(paper_path: Path, settings: dict, force: bool = False) -> tuple[i
                     if prev.exists() and prev != clean_file:
                         shutil.copyfile(prev, clean_file)
                         skipped += 1
+                        note_paper(stem, "identical")
                         logger.info(f"[{stem}] → OCR identical to {registry[file_hash]}.pdf, copied")
                         continue
 
-            logger.info(f"[{stem}] running Unlimited-OCR...")
-            text = client.ocr_pdf(
-                pdf_file,
-                prompt,
-                output_path=raw_dir / stem,
-                dpi=ocr_cfg.get("dpi", 300),
-                image_size=ocr_cfg.get("image_size", 1024),
-                max_length=ocr_cfg.get("max_length", 32768),
-                no_repeat_ngram_size=ocr_cfg.get("no_repeat_ngram_size", 35),
-                ngram_window=ocr_cfg.get("ngram_window", 1024),
-            )
+            with timed(f"[{stem}] OCR", stem=stem):
+                text = client.ocr_pdf(
+                    pdf_file,
+                    prompt,
+                    output_path=raw_dir / stem,
+                    dpi=ocr_cfg.get("dpi", 300),
+                    image_size=ocr_cfg.get("image_size", 1024),
+                    max_length=ocr_cfg.get("max_length", 32768),
+                    no_repeat_ngram_size=ocr_cfg.get("no_repeat_ngram_size", 35),
+                    ngram_window=ocr_cfg.get("ngram_window", 1024),
+                )
             if not text:
+                note_paper(stem, "empty")
                 logger.warning(f"[{stem}] → empty OCR output, skipping")
                 continue
 
